@@ -20,11 +20,14 @@ namespace FM2_PersonalMod.Utils
             "High Speed Lv4",
             "Hunting Lv4",
             "Switch Lv4",
-            "Terror Shot Lv4",
+            "Feint Lv4",
             "Sniper Lv4",
             "Immortal Lv4",
+            "Guide Lv4",
             "Invalid Honor",
-            "Skill Control"
+            "Skill Control",
+            "Skill Up Lv2",
+            "Surrender Call"
         };
 
         public static List<string> CommanderSkills = new List<string>()
@@ -33,8 +36,11 @@ namespace FM2_PersonalMod.Utils
             "Z.O.C.",
             "Terror Shot Lv4",
             "Immortal Lv4",
+            "Guide Lv4",
             "Invalid Honor",
-            "Skill Control"
+            "Skill Up Lv2",
+            "Skill Down Lv2",
+            "Surrender Call"
         };
 
         public static List<string> SpecialPilots = new List<string>()
@@ -91,11 +97,11 @@ namespace FM2_PersonalMod.Utils
             float scaleMultiplier = 1;
             if (SpecialPilots.Contains(unit.Pilot.Stats.Callsign))
             {
-                scaleMultiplier = (float)1.35;
+                scaleMultiplier = (float)1.45;
             }
             else if (CommanderPilots.Contains(unit.Pilot.Stats.Callsign))
             {
-                scaleMultiplier = (float)1.2;
+                scaleMultiplier = (float)1.22;
             }
             FM2_PersonalModPlugin.Log.LogInfo($"Vanilla Scale:{unit.transform.localScale}");
             unit.transform.localScale *= scaleMultiplier;    

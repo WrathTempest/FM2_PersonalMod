@@ -14,7 +14,7 @@ namespace FM2_PersonalMod.Patches
 
         [HarmonyPatch(typeof(UnitsScaleChanger), "SetUnitScale")]
         [HarmonyPriority(0)]
-        [HarmonyPostfix]
+        [HarmonyPrefix]
         public static void ScaleMultiply(CombatStateManager combatController, BattleUnit unit)
         {
             Unit.UnitType type = unit.type;
@@ -30,17 +30,17 @@ namespace FM2_PersonalMod.Patches
                 
                 if (Utils.Helpers.SpecialPilots.Contains(unit.Pilot.Stats.Callsign))
                 {
-                    d *= (float)1.2;
+                    d *= (float)1.05;
                 }
                 else if (Utils.Helpers.CommanderPilots.Contains(unit.Pilot.Stats.Callsign))
                 {
-                    d *= (float)1.12;
+                    d *= (float)1.05;
                 }
                 FM2_PersonalModPlugin.Log.LogInfo($"Player Unit Scale Modifier: {d}");
-                FM2_PersonalModPlugin.Log.LogInfo($"Player Unit Local Scale: {localScale}");
             }
             unitsScaleDataBase.SaveScale(unit, localScale);
             unit.gameObject.transform.localScale *= d;
+            FM2_PersonalModPlugin.Log.LogInfo($"Unit Team: {unit.unitTeam}, Unit Scale: {unit.gameObject.transform.localScale}");
 
         }
 
@@ -51,56 +51,93 @@ namespace FM2_PersonalMod.Patches
         {
             BattleUnit attackerUnit = attackInstance.AttackerUnit;
             BattleUnit defenderUnit = attackInstance.DefenderUnit;
-
+            double multiplier = 1;
             FM2_PersonalModPlugin.Log.LogInfo($"Original Skill Name: {__instance.SkillName}, Activation Chance: {__result}");
 
             if (attackerUnit is PlayerUnit)
             {
-                __result *= (float)1.5;
+                multiplier *= 1.5;
                 if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
                 {
-                    __result *= (float)2;
+                    multiplier *= 2;
+                }
+                else if (Utils.Helpers.CommanderPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                {
+                    multiplier *= 1.5;
                 }
             }
             if (defenderUnit is PlayerUnit)
             {
-                __result *= (float)1.5;
-                if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                multiplier *= (float)1.5;
+                if (Utils.Helpers.SpecialPilots.Contains(defenderUnit.Pilot.Stats.Callsign))
                 {
-                    __result *= (float)2;
+                    multiplier *= 2;
+                }
+                else if (Utils.Helpers.CommanderPilots.Contains(defenderUnit.Pilot.Stats.Callsign))
+                {
+                    multiplier *= 1.5;
                 }
             }
-
-            FM2_PersonalModPlugin.Log.LogInfo($"Skill Trigger Chance Modified! Skill Name: {__instance.SkillName}, Activation Chance: {__result}");
+            __result *= (float)multiplier;
+            FM2_PersonalModPlugin.Log.LogInfo($"Skill Trigger: {__instance.SkillName}, Activation Chance: {__result}, Multiplier: {multiplier}");
 
         }
 
         [HarmonyPatch(typeof(BattleSkillBase), "GetChainProbability")]
         [HarmonyPriority(0)]
-        [HarmonyPostfix]
-        public static void ChainChance(BattleSkillBase __instance, ref float __result, AttackInstance attackInstance)
+        [HarmonyPrefix]
+        public static bool ChainChance_Prefix(BattleSkillBase __instance, AttackInstance attackInstance, ref SkillPreprocessingData preprocessing)
         {
             BattleUnit attackerUnit = attackInstance.AttackerUnit;
             BattleUnit defenderUnit = attackInstance.DefenderUnit;
 
             if (attackerUnit is PlayerUnit)
             {
-                __result *= (float)1.5;
+                FM2_PersonalModPlugin.Log.LogInfo($"[PREFIX] Original Allowed Skills: {preprocessing.AllowedSkills}");
                 if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
                 {
-                    __result *= (float)1.2;
+                    preprocessing.AllowedSkills = 4;
+
+                }
+                else if (Utils.Helpers.CommanderPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                {
+                    preprocessing.AllowedSkills = 4;
+                }               
+            }
+            return true;
+        }
+
+        [HarmonyPatch(typeof(BattleSkillBase), "GetChainProbability")]
+        [HarmonyPriority(0)]
+        [HarmonyPostfix]
+        public static void ChainChance(BattleSkillBase __instance, ref float __result, AttackInstance attackInstance, SkillPreprocessingData preprocessing)
+        {
+            double multiplier = 1;
+            BattleUnit attackerUnit = attackInstance.AttackerUnit;
+            BattleUnit defenderUnit = attackInstance.DefenderUnit;
+            if (attackerUnit is PlayerUnit)
+            {
+                multiplier *= 1.3;
+                if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                {
+                    multiplier *= 1.2;
+
+                }
+                else if (Utils.Helpers.CommanderPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                {
+                    multiplier *= 1.1;
                 }
             }
             if (defenderUnit is PlayerUnit)
             {
-                __result *= (float)1.5;
-                if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                multiplier *= 1.5;
+                if (Utils.Helpers.SpecialPilots.Contains(defenderUnit.Pilot.Stats.Callsign))
                 {
-                    __result *= (float)1.5;
+                    multiplier *= 1.5;
                 }
             }
-            FM2_PersonalModPlugin.Log.LogInfo($"Skill Chain Chance Modified! Skill Name: {__instance.SkillName}, Chain Chance: {__result}");
-
+            __result *= (float)multiplier;
+            FM2_PersonalModPlugin.Log.LogInfo($"Skill Chain: {__instance.SkillName}, Chance: {__result}, Allowed Skills: {preprocessing.AllowedSkills}, Chance Multiplier: {multiplier}");
         }
 
         [HarmonyPatch(typeof(UnitGraphics), "LoadParts")]
@@ -154,26 +191,29 @@ namespace FM2_PersonalMod.Patches
 
         
 
-        [HarmonyPatch(typeof(BattleCalculationSettings), "ProcessAccuracy")]
+        [HarmonyPatch(typeof(AttackInstance), "DidHitRaw")]
         [HarmonyPriority(0)]
-        [HarmonyPrefix]
-        public static void Accuracy(BattleCalculationSettings __instance, AttackInstance attack, AttackInstance.SingleHit hit)
+        [HarmonyPostfix]
+        public static void Accuracy(AttackInstance __instance, AttackInstance.SingleHit hit, ref int attackChance, ref bool __result, PilotStats.PilotHandicap handicap)
         {
-            double multiplier = 1;
-            BattleUnit attackerUnit = attack.AttackerUnit;
-            BattleUnit defenderUnit = attack.DefenderUnit;
-            FM2_PersonalModPlugin.Log.LogInfo($"Original Player Hit Chance: {hit.AttackChance}");
-            if (attackerUnit is PlayerUnit)
+
+            BattleUnit attackerUnit = __instance.AttackerUnit;
+            
+            if (!(attackerUnit is PlayerUnit))
             {
-                multiplier *= 1.3;
-                if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
-                {
-                    multiplier *= 2;
-                }
+                return;
             }
-            attack.MultiplyAllAttackChances((float)multiplier);
-            hit.MultiplyAttackChance((float)multiplier);
-            FM2_PersonalModPlugin.Log.LogInfo($"Modified Player Hit Chance: {hit.AttackChance}, enemy Evade Chance: {hit.EvadeChance}");
+            attackChance = __instance.Settings.ProcessAccuracy(__instance, hit, true);
+            attackChance = handicap.GetHit(attackChance);
+            double multiplier = 1.4;
+            FM2_PersonalModPlugin.Log.LogInfo($"Original Player Hit Chance: {attackChance}");
+            if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+            {
+                multiplier *= 2;
+            }
+            attackChance = (int)(attackChance * multiplier);
+            FM2_PersonalModPlugin.Log.LogInfo($"Modified Player Hit Chance: {attackChance}, enemy Evade Chance: {hit.EvadeChance}");
+            __result = Utility.CheckChance0To100(attackChance);
         }
 
 
