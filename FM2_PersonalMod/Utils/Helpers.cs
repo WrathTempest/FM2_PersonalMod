@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using Pathfinding;
 
 namespace FM2_PersonalMod.Utils
 {
@@ -13,6 +14,9 @@ namespace FM2_PersonalMod.Utils
     /// </summary>
     internal static class Helpers
     {
+
+        static readonly AccessTools.FieldRef<Grid, BattleGridGenerator> gridGeneratorRef = AccessTools.FieldRefAccess<Grid, BattleGridGenerator>("gridGenerator");
+        public static readonly int MaxHonorRange = 3;
         public static List<string> SpecialSkills = new List<string>()
         {
             "Dash Lv4",
@@ -25,8 +29,10 @@ namespace FM2_PersonalMod.Utils
             "Immortal Lv4",
             "Guide Lv4",
             "Invalid Honor",
+            "Invalid APB",
             "Skill Control",
             "Skill Up Lv2",
+            "Morale",
             "Surrender Call"
         };
 
@@ -38,8 +44,10 @@ namespace FM2_PersonalMod.Utils
             "Immortal Lv4",
             "Guide Lv4",
             "Invalid Honor",
+            "Invalid APB",
             "Skill Up Lv2",
             "Skill Down Lv2",
+            "Morale",
             "Surrender Call"
         };
 
@@ -74,6 +82,68 @@ namespace FM2_PersonalMod.Utils
             {DifficultyManager.DifficultyLevels.Extreme, 1.7},
             {DifficultyManager.DifficultyLevels.Impossible, 2}
         };
+
+        public static bool IsWithinRange(BattleUnit owner, BattleUnit target, int range)
+        {
+            Tile ownerTile = owner.MovementController.OccupiedTile ?? owner.MovementController.OccupiedTileBeforeRemoved;
+            Tile targetTile = target.MovementController.OccupiedTile ?? target.MovementController.OccupiedTileBeforeRemoved;
+
+            if (ownerTile == null || targetTile == null) return false;
+
+            int dx = Math.Abs(ownerTile.X - targetTile.X);
+            int dz = Math.Abs(ownerTile.Z - targetTile.Z);
+
+            // Diagonal-aware range: matches your “cross + diagonals” behavior
+            return Math.Max(dx, dz) <= range;
+        }
+
+        public static int GetCustomRange(Pilot pilot, Unit.UnitTeam team)
+        {
+            String callsign = pilot.Stats.Callsign;
+            if (team != Unit.UnitTeam.PlayerUnit)
+            {
+                return 1;
+            }
+            if (SpecialPilots.Contains(callsign))
+            {
+                return 3;
+            }
+            if (CommanderPilots.Contains(callsign))
+            {
+                return 2;
+            }          
+            return 1;
+        }
+
+        public static List<Tile> GetTilesInRange(Grid grid, Tile tile, int range)
+        {
+            List<Tile> list = new List<Tile>();
+            BattleGridGenerator gridGenerator = gridGeneratorRef(grid);
+            for (int dx = -range; dx <= range; dx++)
+            {
+                for (int dz = -range; dz <= range; dz++)
+                {
+                    // Manhattan distance check
+                    if (Math.Abs(dx) + Math.Abs(dz) > range)
+                        continue;
+
+                    int x = tile.X + dx;
+                    int z = tile.Z + dz;
+
+                    // Skip center tile
+                    if (dx == 0 && dz == 0)
+                        continue;
+
+                    // Bounds check
+                    if (x < 0 || z < 0 || x >= gridGenerator.MapWidth || z >= gridGenerator.MapHeight)
+                        continue;
+
+                    list.Add(grid.gridArray[x, z]);
+                }
+            }
+
+            return list;
+        }
         public static bool IsPlayer(Unit unit)
         {     
             return unit.unitTeam == Unit.UnitTeam.PlayerUnit;
@@ -105,6 +175,24 @@ namespace FM2_PersonalMod.Utils
             }
             FM2_PersonalModPlugin.Log.LogInfo($"Vanilla Scale:{unit.transform.localScale}");
             unit.transform.localScale *= scaleMultiplier;    
+        }
+
+        public static List<BattleUnit> GetBattleUnits(List<ValueTuple<HonorSkillBase, BattleUnit>> tuple)
+        {
+            List<BattleUnit> units = new List<BattleUnit>();
+            if (tuple == null)
+            {
+                return units;
+            }
+            if (tuple.Count <=0)
+            {
+                return units;
+            }
+            foreach (ValueTuple<HonorSkillBase, BattleUnit> vt in tuple)
+            {
+                units.Add(vt.Item2);
+            }
+            return units;
         }
 
         private static Skill[] AddSkills(Skill[] skills, PilotStats stats, List<string> SkillSet = null)

@@ -1,9 +1,11 @@
 ﻿using HarmonyLib;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.Diagnostics;
+using static UnityEngine.UI.CanvasScaler;
 
 namespace FM2_PersonalMod.Patches
 {
@@ -218,9 +220,9 @@ namespace FM2_PersonalMod.Patches
 
 
         //Modify Skill Equip Limits
-        [HarmonyPatch(typeof(PilotSkills), MethodType.Constructor, new Type[] { typeof(PilotSkills) })]
-        [HarmonyPriority(0)]
-        [HarmonyPrefix]
+        //[HarmonyPatch(typeof(PilotSkills), MethodType.Constructor, new Type[] { typeof(PilotSkills) })]
+        //[HarmonyPriority(0)]
+        //[HarmonyPrefix]
         public static bool PilotSkills(PilotSkills __instance, PilotSkills skills)
         {
             if (skills.Equipped == null)
@@ -300,10 +302,10 @@ namespace FM2_PersonalMod.Patches
 
         
 
-        [HarmonyPatch(typeof(Machine), "CalculateMove")]
+        [HarmonyPatch(typeof(Machine), "RefreshMove")]
         [HarmonyPriority(0)]
         [HarmonyPostfix]
-        public static void BoostMove(Machine __instance, ref int __result)
+        public static void BoostMove(Machine __instance)
         {
             double multiplier = 1;
             if (__instance == null)
@@ -319,9 +321,14 @@ namespace FM2_PersonalMod.Patches
             {
                 multiplier *= 1.5;
             }
-            multiplier *= 1.5;
-            //FM2_PersonalModPlugin.Log.LogInfo($"Boosted Movement by: {multiplier}");
-            __result = (int)(__result * multiplier);
+            if (Utils.Helpers.CommanderPilots.Contains(__instance.Stats.Owner.Pilot.Stats.Callsign))
+            {
+                multiplier *= 1.25;
+            }
+            multiplier *= 1.25;
+            
+            int move = (int)(__instance.Move * multiplier);
+            Utils.Helpers.SetPrivateProperty<int>(__instance, "Move", move);
         }
 
         [HarmonyPatch(typeof(BattleUnit), "MaxMovementRange")]
@@ -329,23 +336,15 @@ namespace FM2_PersonalMod.Patches
         [HarmonyPostfix]
         public static void BoostMove(BattleUnit __instance, ref int __result)
         {
-            double multiplier = 1;
             if (__instance == null)
             {
                 return;
             }
-           // FM2_PersonalModPlugin.Log.LogInfo($"In Calculate Move Patch!");
             if (!Utils.Helpers.IsPlayer(__instance))
             {
                 return;
-            }
-            if (Utils.Helpers.SpecialPilots.Contains(__instance.Pilot.Stats.Callsign))
-            {
-                multiplier *= 1.5;
-            }
-            multiplier *= 1.5;
-            //FM2_PersonalModPlugin.Log.LogInfo($"(BattleUnit) Boosted Movement by: {multiplier}");
-            __result = (int)(__result * multiplier);
+            }         
+            __result = 999;
         }
 
         [HarmonyPatch(typeof(BodyStats), "get_PowerOutput")]
@@ -353,6 +352,7 @@ namespace FM2_PersonalMod.Patches
         [HarmonyPostfix]
         public static void get_Output(BodyStats __instance,ref int __result)
         {
+            double multiplier = 1;
             if (__instance == null)
             {
                 return;
@@ -362,14 +362,143 @@ namespace FM2_PersonalMod.Patches
                 return;
             }
             //FM2_PersonalModPlugin.Log.LogInfo($"In PowerOutput Patch!");
-            if (!Utils.Helpers.IsPlayer(__instance.Owner))
+            Unit unit = __instance.Owner;
+            if (!Utils.Helpers.IsPlayer(unit))
             {
                 return;
             }
-            Utils.Helpers.SetPrivateProperty<int>(__instance, "PowerOutput", 999);
-            __result = 999;
+            if (Utils.Helpers.SpecialPilots.Contains(unit.Pilot.Stats.Callsign))
+            {
+                multiplier *= 2;
+            }
+            if (Utils.Helpers.CommanderPilots.Contains(unit.Pilot.Stats.Callsign))
+            {
+                multiplier *= 1.5;
+            }
+            multiplier *= 1.75;
+            //Utils.Helpers.SetPrivateProperty<int>(__instance, "PowerOutput", 999);
+            __result = (int)(__result * multiplier);
         }
 
+        static readonly AccessTools.FieldRef<HonorSystem, GridPathfinder> pathfinderRef = AccessTools.FieldRefAccess<HonorSystem, GridPathfinder>("pathfinder");
+        static readonly AccessTools.FieldRef<GridPathfinder, Unit> unitRef = AccessTools.FieldRefAccess<GridPathfinder, Unit>("unit");
+
+        [HarmonyPatch(typeof(HonorSystem), "CheckHonorSkills", new Type[] { })]
+        [HarmonyPriority(0)]
+        [HarmonyPrefix]
+        public static bool CheckInfluenced(HonorSystem __instance)
+        {
+            //Modified via a postfix patch to return all units within 3 Tile Range (modify it in helpers)
+            List<BattleUnit> influencedUnits = Utils.Helpers.GetPrivateField<List<BattleUnit>>(__instance, "influencedUnits");
+            List<BattleUnit> unitsInRange = (List<BattleUnit>)Utils.Helpers.Call(__instance, "GetUnitsInRange");
+            List<BattleUnit> underInfluence = Utils.Helpers.GetBattleUnits(__instance.UnderInfluence);          
+            List<BattleUnit> allunits = new List<BattleUnit>();
+            allunits.AddRange(influencedUnits);
+            allunits.AddRange(unitsInRange);
+            allunits.AddRange(underInfluence);
+
+            //This is the owner's actual honor range
+            int ownRange = Utils.Helpers.GetCustomRange(__instance.Owner.Pilot, __instance.Owner.unitTeam);
+            foreach (BattleUnit battleUnit in allunits)
+            {
+                int range = Utils.Helpers.GetCustomRange(battleUnit.Pilot, battleUnit.unitTeam);
+                //Need to check if the owner is actually in range using own range
+                
+                if (!Utils.Helpers.IsWithinRange(__instance.Owner, battleUnit, ownRange))
+                {
+                    Utils.Helpers.Call(__instance, "StopInfluenceUnit", battleUnit);
+                    
+                }
+                //Need to check the reverse, if the battleUnit is in range with the owner using its range
+                //FM2_PersonalModPlugin.Log.LogInfo($"Is {__instance.Owner} within the range of {battleUnit}? {Utils.Helpers.IsWithinRange(battleUnit, __instance.Owner, range)}");
+                if (!Utils.Helpers.IsWithinRange(battleUnit, __instance.Owner, range))
+                {
+                    if (battleUnit.Honor != null)
+                    {
+                        //FM2_PersonalModPlugin.Log.LogError($"Stopping Influence of Unit: {battleUnit} on Unit: {__instance.Owner}");
+                        Utils.Helpers.Call(battleUnit.Honor, "StopInfluenceUnit", __instance.Owner);
+                    }
+                       
+                }
+            }
+
+            foreach (BattleUnit battleUnit2 in allunits)
+            {
+                int range = Utils.Helpers.GetCustomRange(battleUnit2.Pilot, battleUnit2.unitTeam);
+                List<BattleUnit> unit_influencedUnits = Utils.Helpers.GetPrivateField<List<BattleUnit>>(battleUnit2.Honor, "influencedUnits");
+                if (Utils.Helpers.IsWithinRange(__instance.Owner, battleUnit2, ownRange))
+                {
+                    if (!influencedUnits.Contains(battleUnit2))
+                    {
+                        Utils.Helpers.Call(__instance, "InfluenceUnit", battleUnit2);
+                    }
+                }
+                if (Utils.Helpers.IsWithinRange(battleUnit2, __instance.Owner, range))
+                {
+                    if (!unit_influencedUnits.Contains(__instance.Owner))
+                    {
+                        if (battleUnit2.Honor != null)
+                        {
+                            Utils.Helpers.Call(battleUnit2.Honor, "InfluenceUnit", __instance.Owner);
+                        }
+                    }
+                        
+
+                }           
+
+            }
+
+            //Logging Purposes
+            if (!Utils.Helpers.IsPlayer(__instance.Owner))
+            {
+                return false;
+                
+            }
+            FM2_PersonalModPlugin.Log.LogInfo($"Printing influenced units of Owner: {__instance.Owner}");
+            List<BattleUnit> units = Utils.Helpers.GetPrivateField<List<BattleUnit>>(__instance, "influencedUnits");
+            if (units == null)
+            {
+                return false;
+            }
+            foreach (BattleUnit unit in units)
+            {
+                FM2_PersonalModPlugin.Log.LogInfo($"Influencing Unit: {unit}");
+            }
+            foreach (ValueTuple<HonorSkillBase, BattleUnit> valueTuple in __instance.UnderInfluence)
+            {
+                FM2_PersonalModPlugin.Log.LogInfo($"Influenced By Unit: {valueTuple.Item2}, Honor Skill: {valueTuple.Item1.SkillName}");
+            }
+            return false;
+            
+        }
+
+        [HarmonyPatch(typeof(HonorSystem), "GetUnitsInRange")]
+        [HarmonyPriority(0)]
+        [HarmonyPostfix]
+        public static void HonorRange(HonorSystem __instance, ref List<BattleUnit> __result)
+        {   
+            //This should apply to every unit!
+            List<BattleUnit> units = new List<BattleUnit>();
+            GridPathfinder pathfinder = pathfinderRef(__instance);
+            //Unit unit = unitRef(pathfinder);
+            Unit unit = __instance.Owner;
+            Tile tile = unit.MovementController.OccupiedTile ?? unit.MovementController.OccupiedTileBeforeRemoved;
+            int range = Utils.Helpers.MaxHonorRange;
+            List<Tile> inRange = Utils.Helpers.GetTilesInRange(Grid.Instance, tile, range);
+            foreach (Tile item in inRange)
+            {
+                if (!item.Unit || item.Unit == __instance.Owner)
+                {
+                    continue;
+                }
+                BattleUnit battleUnit = item.Unit as BattleUnit;
+                if (battleUnit != null || item.Unit.TryGetComponent<BattleUnit>(out battleUnit))
+                {
+                    units.Add(battleUnit);
+                }
+            }
+            __result = units;
+        }
 
         [HarmonyPatch(typeof(PartStats), nameof(PartStats.SetDifficultyHP))]
         [HarmonyPriority(0)]
