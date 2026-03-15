@@ -1,11 +1,12 @@
 ﻿using HarmonyLib;
+using Pathfinding;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using Pathfinding;
 
 namespace FM2_PersonalMod.Utils
 {
@@ -16,7 +17,9 @@ namespace FM2_PersonalMod.Utils
     {
 
         static readonly AccessTools.FieldRef<Grid, BattleGridGenerator> gridGeneratorRef = AccessTools.FieldRefAccess<Grid, BattleGridGenerator>("gridGenerator");
+        public static Dictionary<string, Sprite> Images = new Dictionary<string, Sprite>();
         public static readonly int MaxHonorRange = 3;
+        public static readonly int DefaultChainCount = 4;
         public static List<string> SpecialSkills = new List<string>()
         {
             "Dash Lv4",
@@ -40,7 +43,6 @@ namespace FM2_PersonalMod.Utils
         {
             "Dash Lv4",
             "Z.O.C.",
-            "Terror Shot Lv4",
             "Immortal Lv4",
             "Guide Lv4",
             "Invalid Honor",
@@ -83,6 +85,20 @@ namespace FM2_PersonalMod.Utils
             {DifficultyManager.DifficultyLevels.Impossible, 2}
         };
 
+        public static int GetChainLimit(BattleUnit unit)
+        {
+            int limit = DefaultChainCount;
+            string name = unit.Pilot.Stats.Callsign;
+            if (SpecialPilots.Contains(name))
+            {
+                limit += 2;
+            }
+            if (CommanderPilots.Contains(name))
+            {
+                limit += 1;
+            }
+            return limit;
+        }
         public static bool IsWithinRange(BattleUnit owner, BattleUnit target, int range)
         {
             Tile ownerTile = owner.MovementController.OccupiedTile ?? owner.MovementController.OccupiedTileBeforeRemoved;
@@ -93,8 +109,11 @@ namespace FM2_PersonalMod.Utils
             int dx = Math.Abs(ownerTile.X - targetTile.X);
             int dz = Math.Abs(ownerTile.Z - targetTile.Z);
 
-            // Diagonal-aware range: matches your “cross + diagonals” behavior
-            return Math.Max(dx, dz) <= range;
+            if (range == 1)
+            {
+                return (dx + dz) <= range;
+            }
+            return (dx + dz) <= range;
         }
 
         public static int GetCustomRange(Pilot pilot, Unit.UnitTeam team)
@@ -237,22 +256,31 @@ namespace FM2_PersonalMod.Utils
         public static void UpdatePlayerSkills(PilotStats stats)
         {
             Skill[] skills = stats.Skills.Equipped;
+            Skill[] equipped = new Skill[4];
+            int size = Math.Min(skills.Length, equipped.Length);
+            for (int i = 0; i < size; i++) 
+            {
+                if (skills[i] != null)
+                {
+                    equipped[i] = skills[i];
+                }
+            }
             if (SpecialPilots.Contains(stats.Callsign))
             {
                 FM2_PersonalModPlugin.Log.LogInfo($"Attempting to Modify Skills of Special Pilot: {stats.Callsign}...");
-                skills = AddSkills(skills, stats, SpecialSkills);
+                skills = AddSkills(equipped, stats, SpecialSkills);
                 FM2_PersonalModPlugin.Log.LogInfo($"Successfully Added Skills!");
             }
             else if (CommanderPilots.Contains(stats.Callsign))
             {
                 FM2_PersonalModPlugin.Log.LogInfo($"Attempting to Modify Skills of Commander Pilot: {stats.Callsign}...");
-                skills = AddSkills(skills, stats, CommanderSkills);
+                skills = AddSkills(equipped, stats, CommanderSkills);
                 FM2_PersonalModPlugin.Log.LogInfo($"Successfully Added Skills!");
             }
             else
             {
                 FM2_PersonalModPlugin.Log.LogInfo($"Attempting to Modify Skills of Pilot: {stats.Callsign}...");
-                skills = AddSkills(skills, stats);
+                skills = AddSkills(equipped, stats);
                 FM2_PersonalModPlugin.Log.LogInfo($"Successfully Added Skills!");
             }
             stats.Skills.Equipped = skills;
@@ -443,6 +471,124 @@ namespace FM2_PersonalMod.Utils
                 throw new MissingMethodException(type.FullName, methodName);
 
             return method.Invoke(null, args);
+        }
+
+        public static void DumpSprite(Sprite sprite, string fileName)
+        {
+            if (sprite == null)
+                return;
+
+            Texture2D source = sprite.texture;
+            Rect rect = sprite.rect;
+
+            Texture2D readableTex;
+
+            // If texture is readable we can use it directly
+            if (source.isReadable)
+            {
+                readableTex = source;
+            }
+            else
+            {
+                RenderTexture rt = RenderTexture.GetTemporary(
+                    source.width,
+                    source.height,
+                    0,
+                    RenderTextureFormat.Default,
+                    RenderTextureReadWrite.sRGB
+                );
+
+                Graphics.Blit(source, rt);
+
+                RenderTexture previous = RenderTexture.active;
+                RenderTexture.active = rt;
+
+                readableTex = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
+                readableTex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+                readableTex.Apply();
+
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(rt);
+            }
+
+            // Crop sprite from atlas
+            Texture2D tex = new Texture2D((int)rect.width, (int)rect.height, TextureFormat.RGBA32, false, false);
+
+            Color[] pixels = readableTex.GetPixels(
+                (int)rect.x,
+                (int)rect.y,
+                (int)rect.width,
+                (int)rect.height
+            );
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+
+            byte[] png = tex.EncodeToPNG();
+
+            string pluginDir = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string dumpDir = System.IO.Path.Combine(pluginDir, "Image", "Dump");
+
+            Directory.CreateDirectory(dumpDir);
+
+            string path = System.IO.Path.Combine(dumpDir, fileName + ".png");
+
+            File.WriteAllBytes(path, png);
+        }
+
+        public static Dictionary<string, Sprite> LoadReplacementSprites()
+        {
+            Dictionary<string, Sprite> sprites = new Dictionary<string, Sprite>();
+
+            string pluginDir = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string replaceDir = System.IO.Path.Combine(pluginDir, "Image", "Replace");
+
+            if (!Directory.Exists(replaceDir))
+                return sprites;
+
+            string[] files = Directory.GetFiles(replaceDir, "*.png");
+
+            foreach (string file in files)
+            {
+                byte[] data = File.ReadAllBytes(file);
+
+                Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                tex.LoadImage(data);
+
+                Sprite sprite = Sprite.Create(
+                    tex,
+                    new Rect(0, 0, tex.width, tex.height),
+                    new Vector2(0.5f, 0.5f),
+                    100f
+                );
+
+                string key = System.IO.Path.GetFileNameWithoutExtension(file);
+
+                sprites[key] = sprite;
+            }
+
+            return sprites;
+        }
+
+        public static Sprite GetReplacementSprite(Dictionary<string, Sprite> dict, Sprite original)
+        {
+            if (original == null || dict == null)
+                return original;
+
+            string name = original.name;
+
+            int first = name.IndexOf('_');
+            int second = first >= 0 ? name.IndexOf('_', first + 1) : -1;
+
+            string key = second > 0 ? name.Substring(0, second) : name;
+
+            if (dict.TryGetValue(key, out Sprite replacement))
+            {
+                return replacement;
+            }
+
+            // fallback to original sprite
+            return original;
         }
     }
 }

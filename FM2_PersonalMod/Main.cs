@@ -24,6 +24,7 @@ namespace FM2_PersonalMod
         private void Awake()
         {
             Logger.LogInfo($"PluginName: {PluginName}, VersionString: {VersionString} is loading...");
+            Utils.Helpers.Images = Utils.Helpers.LoadReplacementSprites();
             Harmony.PatchAll();
             Logger.LogInfo($"PluginName: {PluginName}, VersionString: {VersionString} is loaded.");
 

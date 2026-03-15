@@ -87,6 +87,10 @@
       <HintPath>DLL\UnityEngine.CoreModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>DLL\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <HintPath>DLL\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>

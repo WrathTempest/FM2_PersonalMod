@@ -46,17 +46,42 @@ namespace FM2_PersonalMod.Patches
 
         }
 
+        [HarmonyPatch(typeof(SkillProcessor), "ChooseSkill")]
+        [HarmonyPriority(0)]
+        [HarmonyPrefix]
+        public static void SkillChoice(ref SkillPreprocessingData data, AttackInstance attack, bool isAttacker)
+        {
+            BattleUnit attackerUnit = attack.AttackerUnit;
+            BattleUnit defenderUnit = attack.DefenderUnit;
+
+            if (data.FirstSkill != true)
+            {
+                return;
+            }       
+            if (attackerUnit is PlayerUnit && isAttacker && data.AllowedSkills == Utils.Helpers.DefaultChainCount)
+            {
+                int limit = Utils.Helpers.GetChainLimit(attackerUnit);
+                data.AllowedSkills = limit;
+            }
+            if (defenderUnit is PlayerUnit && !isAttacker && data.AllowedSkills == Utils.Helpers.DefaultChainCount)
+            {
+                int limit = Utils.Helpers.GetChainLimit(defenderUnit);
+                data.AllowedSkills = limit;
+            }
+
+        }
+
         [HarmonyPatch(typeof(BattleSkillBase), nameof(BattleSkillBase.GetActivationChance))]
         [HarmonyPriority(0)]
         [HarmonyPostfix]
-        public static void ActivationChance(BattleSkillBase __instance, ref float __result, AttackInstance attackInstance)
+        public static void ActivationChance(BattleSkillBase __instance, ref float __result, bool isAttacker, AttackInstance attackInstance)
         {
             BattleUnit attackerUnit = attackInstance.AttackerUnit;
             BattleUnit defenderUnit = attackInstance.DefenderUnit;
             double multiplier = 1;
             FM2_PersonalModPlugin.Log.LogInfo($"Original Skill Name: {__instance.SkillName}, Activation Chance: {__result}");
 
-            if (attackerUnit is PlayerUnit)
+            if (attackerUnit is PlayerUnit && isAttacker)
             {
                 multiplier *= 1.5;
                 if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
@@ -68,7 +93,7 @@ namespace FM2_PersonalMod.Patches
                     multiplier *= 1.5;
                 }
             }
-            if (defenderUnit is PlayerUnit)
+            if (defenderUnit is PlayerUnit && !isAttacker)
             {
                 multiplier *= (float)1.5;
                 if (Utils.Helpers.SpecialPilots.Contains(defenderUnit.Pilot.Stats.Callsign))
@@ -85,39 +110,39 @@ namespace FM2_PersonalMod.Patches
 
         }
 
-        [HarmonyPatch(typeof(BattleSkillBase), "GetChainProbability")]
+        [HarmonyPatch(typeof(BattleSkillBase), "GetPreprocessingData")]
         [HarmonyPriority(0)]
-        [HarmonyPrefix]
-        public static bool ChainChance_Prefix(BattleSkillBase __instance, AttackInstance attackInstance, ref SkillPreprocessingData preprocessing)
+        [HarmonyPostfix]
+        public static void ModifyAffinity(BattleSkillBase __instance, AttackInstance attackInstance, bool isAttacker, ref SkillPreprocessingData __result)
         {
             BattleUnit attackerUnit = attackInstance.AttackerUnit;
             BattleUnit defenderUnit = attackInstance.DefenderUnit;
-
-            if (attackerUnit is PlayerUnit)
+            if (attackerUnit is PlayerUnit && isAttacker)
             {
-                FM2_PersonalModPlugin.Log.LogInfo($"[PREFIX] Original Allowed Skills: {preprocessing.AllowedSkills}");
-                if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
+                if (!__instance.HasAfinity)
                 {
-                    preprocessing.AllowedSkills = 4;
-
+                    __result.AllowedSkills = 4;
                 }
-                else if (Utils.Helpers.CommanderPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
-                {
-                    preprocessing.AllowedSkills = 4;
-                }               
             }
-            return true;
+            if (defenderUnit is PlayerUnit && !isAttacker)
+            {
+                if (!__instance.HasAfinity)
+                {
+                    __result.AllowedSkills = 4;
+                }
+            }
         }
+
 
         [HarmonyPatch(typeof(BattleSkillBase), "GetChainProbability")]
         [HarmonyPriority(0)]
         [HarmonyPostfix]
-        public static void ChainChance(BattleSkillBase __instance, ref float __result, AttackInstance attackInstance, SkillPreprocessingData preprocessing)
+        public static void ChainChance(BattleSkillBase __instance, ref float __result, AttackInstance attackInstance, bool isAttacker, SkillPreprocessingData preprocessing)
         {
             double multiplier = 1;
             BattleUnit attackerUnit = attackInstance.AttackerUnit;
             BattleUnit defenderUnit = attackInstance.DefenderUnit;
-            if (attackerUnit is PlayerUnit)
+            if (attackerUnit is PlayerUnit && isAttacker)
             {
                 multiplier *= 1.3;
                 if (Utils.Helpers.SpecialPilots.Contains(attackerUnit.Pilot.Stats.Callsign))
@@ -130,7 +155,7 @@ namespace FM2_PersonalMod.Patches
                     multiplier *= 1.1;
                 }
             }
-            if (defenderUnit is PlayerUnit)
+            if (defenderUnit is PlayerUnit && !isAttacker)
             {
                 multiplier *= 1.5;
                 if (Utils.Helpers.SpecialPilots.Contains(defenderUnit.Pilot.Stats.Callsign))
@@ -273,13 +298,14 @@ namespace FM2_PersonalMod.Patches
             UnitGraphics selectedUnitGraphics = Utils.Helpers.GetPrivateField<UnitGraphics>(__instance, "selectedUnitGraphics");
             PilotStats stats = selectedUnitGraphics.Pilot.Stats;
             PilotSkills skills = stats.Skills;
-            foreach (Skill skill in selectedUnitGraphics.Pilot.Stats.Skills.Equipped)
+            foreach (Skill skill in skills.Equipped)
             {
                 if (skill != null)
                 {
                     FM2_PersonalModPlugin.Log.LogInfo($"Currently Equipped Skills: SkillName: {skill.SkillName}");
                 }
             }
+            //Utils.Helpers.DumpSprite(stats.Picture, stats.Picture.name);
             Utils.Helpers.UpdatePlayerSkills(stats);
         }
 
@@ -312,6 +338,14 @@ namespace FM2_PersonalMod.Patches
             {
                 return;
             }
+            if (__instance.Stats == null)
+            {
+                return;
+            }
+            if (__instance.Stats.Owner == null)
+            {
+                return;
+            }
             //FM2_PersonalModPlugin.Log.LogInfo($"In Calculate Move Patch!");
             if (!Utils.Helpers.IsPlayer(__instance.Stats.Owner))
             {
@@ -334,7 +368,7 @@ namespace FM2_PersonalMod.Patches
         [HarmonyPatch(typeof(BattleUnit), "MaxMovementRange")]
         [HarmonyPriority(0)]
         [HarmonyPostfix]
-        public static void BoostMove(BattleUnit __instance, ref int __result)
+        public static void MaxMovement(BattleUnit __instance, ref int __result)
         {
             if (__instance == null)
             {
@@ -454,7 +488,7 @@ namespace FM2_PersonalMod.Patches
                 return false;
                 
             }
-            FM2_PersonalModPlugin.Log.LogInfo($"Printing influenced units of Owner: {__instance.Owner}");
+            FM2_PersonalModPlugin.Log.LogError($"Printing influenced units of Owner: {__instance.Owner}");
             List<BattleUnit> units = Utils.Helpers.GetPrivateField<List<BattleUnit>>(__instance, "influencedUnits");
             if (units == null)
             {
@@ -534,6 +568,15 @@ namespace FM2_PersonalMod.Patches
                 Utils.Helpers.UpdateUnitScale(unit);
             }
             FM2_PersonalModPlugin.Log.LogInfo("Successfully patched player unit HP!");
+        }
+
+        [HarmonyPatch(typeof(PilotStats), "get_Picture")]
+        [HarmonyPriority(0)]
+        [HarmonyPostfix]
+        public static void LoadPicture(PilotStats __instance, ref Sprite __result)
+        {
+            //FM2_PersonalModPlugin.Log.LogInfo("In LoadPicture Patch!");
+            __result = Utils.Helpers.GetReplacementSprite(Utils.Helpers.Images, __result);
         }
 
         [HarmonyPatch(typeof(AchievementsManager), "UnlockAchievement")]
